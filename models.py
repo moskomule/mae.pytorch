@@ -195,19 +195,18 @@ class MaskedAutoEncoder(nn.Module):
                 input: torch.Tensor
                 ) -> tuple[torch.Tensor, ...]:
         # input: BxCxHxW
-        patches = self.encoder.patch_emb(input)  # BxNxC
+        tokens = self.encoder.patch_emb(input)  # BxNxC
         if not self.encoder.mean_pooling:
-            patches = self.encoder.add_cls_token(patches)
-        patches = patches + self.encoder.pos_emb
+            tokens = self.encoder.add_cls_token(tokens)
+        tokens = tokens + self.encoder.pos_emb
 
         num_masked = int(self.mask_ratio * self.enc_num_patches)
         rand_idx = torch.rand(input.size(0), self.enc_num_patches, device=input.device).argsort(dim=1)
         # masked_idx: BxN''x1, unmasked_idx: BxN'x1
         masked_idx, unmasked_idx = rand_idx.split((num_masked, self.enc_num_patches - num_masked), dim=1)
 
-        unmasked_patches = patches.take_along_dim(unmasked_idx[:, :, None], dim=1)  # BxN'xC
-
-        unmasked_tokens = self.encoder.blocks(unmasked_patches)  # BxN'xC
+        unmasked_tokens = tokens.take_along_dim(unmasked_idx[:, :, None], dim=1)  # BxN'xC
+        unmasked_tokens = self.encoder.blocks(unmasked_tokens)  # BxN'xC
         unmasked_tokens = self.encoder.norm(unmasked_tokens)
 
         unmasked_tokens = self.dec_pos_emb(unmasked_idx) + self.enc_to_dec(unmasked_tokens)  # BxN'xC'
