@@ -12,8 +12,10 @@ from functools import partial
 from typing import Optional, Callable, Type
 
 import torch
+from homura import Registry
 from torch import einsum, nn
 
+ViTModels = Registry('VitModels')
 LayerNorm = partial(nn.LayerNorm, eps=1e-6)
 
 
@@ -81,6 +83,34 @@ class PatchEmbed2d(nn.Module):
         return self.proj(input).flatten(2).transpose(1, 2)
 
 
+class SinusoidalPosEmbed2d(nn.Module):
+    # from facebookresearch/mocov3
+    def __init__(self,
+                 emb_dim: int,
+                 grid_size: int | tuple[int, int],
+                 use_cls_token: bool,
+                 temperature: float = 10_000.0
+                 ):
+        super().__init__()
+        h, w = _to_tuple(grid_size, 2)
+        grid_w, grid_h = torch.meshgrid(torch.arange(w, dtype=torch.float), torch.arange(h, dtype=torch.float))
+        pos_dim = emb_dim // 4
+        omega = torch.arange(pos_dim, dtype=torch.float) / pos_dim
+        omega = 1 / (temperature ** omega)
+        out_w = torch.einsum('m,d->md', [grid_w.flatten(), omega])
+        out_h = torch.einsum('m,d->md', [grid_h.flatten(), omega])
+        pos_emb = torch.cat([out_w.sin(), out_w.cos(), out_h.sin(), out_h.cos()], dim=1)[None, :, :]
+        if use_cls_token:
+            pe_token = torch.zeros([1, 1, emb_dim], dtype=torch.float)
+            pos_emb = torch.cat([pe_token, pos_emb])
+        self.register_buffer("pos_emb", pos_emb)
+
+    def forward(self,
+                input: torch.Tensor
+                ) -> torch.Tensor:
+        return self.pos_emb + input
+
+
 class Block(nn.Module):
     def __init__(self,
                  emb_dim: int,
@@ -128,7 +158,7 @@ class VisionTransformer(nn.Module):
         self.mean_pooling = mean_pooling
 
         self.patch_emb = PatchEmbed2d(self.patch_size, emb_dim, in_channels)
-        self.pos_emb = nn.Parameter(torch.zeros(1, self.num_patches + int(not self.mean_pooling), emb_dim))
+        self.pos_emb = SinusoidalPosEmbed2d(emb_dim, self.image_size[0] // self.patch_size[0], not mean_pooling)
 
         if not self.mean_pooling:
             self.cls_token = nn.Parameter(torch.zeros(1, 1, emb_dim))
@@ -157,14 +187,25 @@ class VisionTransformer(nn.Module):
         x = self.patch_emb(input)  # BxNxC
         if not self.mean_pooling:
             x = self.add_cls_token(x)
-        x = self.dropout(self.pos_emb + x)
+        x = self.dropout(self.pos_emb(x))
         x = self.norm(self.blocks(x))
         x = x.mean(dim=1) if self.mean_pooling else x[:, 0]  # BxC
         return self.fc(x)  # Bx{num_classes}
 
 
+@ViTModels.register
 def vit_b16(**kwargs) -> VisionTransformer:
     return VisionTransformer(768, 12, 12, 16, 224, 1_000, **kwargs)
+
+
+@ViTModels.register
+def vit_b16_384(**kwargs) -> VisionTransformer:
+    return VisionTransformer(768, 12, 12, 16, 384, 1_000, **kwargs)
+
+
+@ViTModels.register
+def vit_l16(**kwargs) -> VisionTransformer:
+    return VisionTransformer(1024, 24, 16, 16, 224, 1_000, **kwargs)
 
 
 class MaskedAutoEncoder(nn.Module):
@@ -198,7 +239,7 @@ class MaskedAutoEncoder(nn.Module):
         tokens = self.encoder.patch_emb(input)  # BxNxC
         if not self.encoder.mean_pooling:
             tokens = self.encoder.add_cls_token(tokens)
-        tokens = tokens + self.encoder.pos_emb
+        tokens = self.encoder.pos_emb(tokens)
 
         num_masked = int(self.mask_ratio * self.enc_num_patches)
         rand_idx = torch.rand(input.size(0), self.enc_num_patches, device=input.device).argsort(dim=1)
@@ -234,7 +275,6 @@ class MaskedAutoEncoder(nn.Module):
         fan_in = proj_w.in_channels * math.prod(proj_w.kernel_size)
         nn.init.trunc_normal_(proj_w.weight, std=math.sqrt(1 / fan_in))
         nn.init.zeros_(proj_w.bias)
-        nn.init.trunc_normal_(self.encoder.pos_emb, std=0.02)
         if not self.encoder.mean_pooling:
             nn.init.trunc_normal_(self.encoder.cls_token, std=0.02)
 

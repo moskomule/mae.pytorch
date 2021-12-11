@@ -10,7 +10,7 @@ import torch
 from homura.vision import DATASET_REGISTRY
 from torch.nn import functional as F
 
-from models import vit_b16
+from models import ViTModels
 
 
 @chika.config
@@ -19,6 +19,7 @@ class OptimConfig:
     warmup_epochs: int = 10
     lr: float = 0.1
     weight_decay: float = 0
+    larc: bool = False
 
 
 @chika.config
@@ -41,6 +42,8 @@ class Trainer(homura.trainers.SupervisedTrainer):
     def __init__(self, *args, **kwargs):
         self.optim_cfg = kwargs.pop('optim_cfg')
         super().__init__(*args, **kwargs)
+        if self.optim_cfg.larc:
+            self.optimizer = homura.optim.LARC(self.optimizer)
 
     def iteration(self,
                   data
@@ -56,8 +59,9 @@ class Trainer(homura.trainers.SupervisedTrainer):
 
 
 def _main(cfg: Config):
-    pretrained_weights: dict[str, torch.Tensor] = torch.load(cfg.path, map_location='cpu')['model']
-    model = vit_b16(mean_pooling=True)
+    loaded = torch.load(cfg.path, map_location='cpu')
+    pretrained_weights: dict[str, torch.Tensor] = loaded['model']
+    model = ViTModels(loaded['cfg']['model']['name'])(mean_pooling=True)
     learnable_module_names = {'fc.weight', 'fc.bias', 'norm.weight', 'norm.bias'}
     for block_id in cfg.finetune_block_ids:
         if block_id > len(model.blocks):
@@ -84,7 +88,8 @@ def _main(cfg: Config):
 
     scheduler = homura.lr_scheduler.CosineAnnealingWithWarmup(cfg.optim.epochs, cfg.optim.warmup_epochs)
     train_loader, test_loader = DATASET_REGISTRY('imagenet')(batch_size=cfg.batch_size,
-                                                             num_workers=cfg.num_workers)
+                                                             num_workers=cfg.num_workers,
+                                                             non_training_bs_factor=1)
 
     with Trainer(model, None, F.cross_entropy, scheduler=scheduler,
                  use_amp=cfg.amp, optim_cfg=cfg.optim) as trainer:

@@ -6,7 +6,7 @@ from homura.trainers import SupervisedTrainer
 from homura.vision.data import DATASET_REGISTRY
 from torch.nn import functional as F
 
-from models import MaskedAutoEncoder, vit_b16
+from models import MaskedAutoEncoder, ViTModels
 
 try:
     import rich
@@ -69,6 +69,7 @@ class DataConfig:
 
 @chika.config
 class ModelConfig:
+    name: str = chika.choices(*ViTModels.choices())
     dec_emb_dim: int = 128
     dec_depth: int = 4
     dec_num_heads: int = 8
@@ -112,7 +113,7 @@ def main(cfg: Config):
         import rich
         rich.print(cfg)
     vs = DATASET_REGISTRY("imagenet")
-    encoder = vit_b16(mean_pooling=True)
+    encoder = ViTModels(cfg.model.name)(mean_pooling=True)
     model = MaskedAutoEncoder(encoder, cfg.model.dec_emb_dim, cfg.model.dec_depth, cfg.model.dec_num_heads,
                               cfg.model.mask_ratio)
     train_loader, _ = vs(batch_size=cfg.data.batch_size,
