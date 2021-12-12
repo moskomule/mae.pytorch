@@ -7,6 +7,7 @@ import chika
 import homura
 import rich
 import torch
+from homura import reporters
 from homura.vision import DATASET_REGISTRY
 from torch.nn import functional as F
 
@@ -91,7 +92,7 @@ def _main(cfg: Config):
                                                              num_workers=cfg.num_workers,
                                                              non_training_bs_factor=1)
 
-    with Trainer(model, None, F.cross_entropy, scheduler=scheduler,
+    with Trainer(model, None, F.cross_entropy, scheduler=scheduler, reporters=[reporters.TensorboardReporter(".")],
                  use_amp=cfg.amp, optim_cfg=cfg.optim) as trainer:
         for epoch in trainer.epoch_range(cfg.optim.epochs):
             trainer.train(train_loader)
