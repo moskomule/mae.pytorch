@@ -60,7 +60,8 @@ class Trainer(homura.trainers.SupervisedTrainer):
 
 
 def _main(cfg: Config):
-    loaded = torch.load(cfg.path, map_location='cpu')
+    path = (chika.original_path / cfg.path).resolve()
+    loaded = torch.load(path, map_location='cpu')
     pretrained_weights: dict[str, torch.Tensor] = loaded['model']
     model = ViTModels(loaded['cfg']['model']['name'])(mean_pooling=True)
     learnable_module_names = {'fc.weight', 'fc.bias', 'norm.weight', 'norm.bias'}
