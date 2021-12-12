@@ -104,7 +104,7 @@ def _main(cfg: Config):
         print(trainer.compute_conf_matrix(test_loader))
 
 
-@chika.main(Config)
+@chika.main(Config, change_job_dir=True)
 @homura.distributed_ready_main
 def main(cfg):
     if homura.is_master():
