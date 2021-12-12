@@ -93,7 +93,8 @@ class SinusoidalPosEmbed2d(nn.Module):
                  ):
         super().__init__()
         h, w = _to_tuple(grid_size, 2)
-        grid_w, grid_h = torch.meshgrid(torch.arange(w, dtype=torch.float), torch.arange(h, dtype=torch.float))
+        grid_w, grid_h = torch.meshgrid(torch.arange(w, dtype=torch.float), torch.arange(h, dtype=torch.float),
+                                        indexing='ij')
         pos_dim = emb_dim // 4
         omega = torch.arange(pos_dim, dtype=torch.float) / pos_dim
         omega = 1 / (temperature ** omega)
