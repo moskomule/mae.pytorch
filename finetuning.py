@@ -30,12 +30,15 @@ class Config:
     batch_size: int = 256
     num_workers: int = 32
     finetune_block_ids: list[int] = chika.sequence()
+    finetune_all: bool = False
 
     gpu: int = 0
     seed: int = 0
     amp: bool = False
 
     def __post_init__(self):
+        assert not (self.finetune_all and len(self.finetune_block_ids) == 0), \
+            'finetune_block_ids and finetune_all are mutually exclusive'
         self.optim.lr *= self.batch_size * homura.get_world_size() / 256
 
 
@@ -64,29 +67,34 @@ def _main(cfg: Config):
     loaded = torch.load(path, map_location='cpu')
     pretrained_weights: dict[str, torch.Tensor] = loaded['model']
     model = ViTModels(loaded['cfg']['model']['name'])(mean_pooling=True)
-    learnable_module_names = {'fc.weight', 'fc.bias', 'norm.weight', 'norm.bias'}
-    for block_id in cfg.finetune_block_ids:
-        if block_id > len(model.blocks):
-            raise ValueError(f'Number of blocks in the model is {len(model.blocks)}, but got {block_id}!')
-        for name, _ in model.named_parameters():
-            if name.startswith(f'blocks.{block_id}'):
-                learnable_module_names.add(name)
+    if not cfg.finetune_all:
+        learnable_module_names = {'fc.weight', 'fc.bias', 'norm.weight', 'norm.bias'}
+        for block_id in cfg.finetune_block_ids:
+            if block_id > len(model.blocks):
+                raise ValueError(f'Number of blocks in the model is {len(model.blocks)}, but got {block_id}!')
+            for name, _ in model.named_parameters():
+                if name.startswith(f'blocks.{block_id}'):
+                    learnable_module_names.add(name)
 
-    num_learnable_params = 0
-    for n, p in model.named_parameters():
-        e_n = f'encoder.{n}'
-        if pretrained_weights.get(e_n) is not None:
-            p.data.copy_(pretrained_weights[e_n].data)
-            if n in learnable_module_names:
-                num_learnable_params += 1
-            else:
-                p.requires_grad_(False)
-    for n, p in model.named_buffers():
-        e_n = f'encoder.{n}'
-        if pretrained_weights.get(e_n) is not None:
-            p.copy_(pretrained_weights[e_n])
+        num_learnable_params = 0
+        for n, p in model.named_parameters():
+            e_n = f'encoder.{n}'
+            if pretrained_weights.get(e_n) is not None:
+                p.data.copy_(pretrained_weights[e_n].data)
+                if n in learnable_module_names:
+                    num_learnable_params += 1
+                else:
+                    p.requires_grad_(False)
+        for n, p in model.named_buffers():
+            e_n = f'encoder.{n}'
+            if pretrained_weights.get(e_n) is not None:
+                p.copy_(pretrained_weights[e_n])
 
-    assert len(learnable_module_names) == num_learnable_params, f"{learnable_module_names=}, {num_learnable_params=}"
+        assert len(learnable_module_names) == num_learnable_params, f"mismatch"
+
+        if len(cfg.finetune_block_ids) == 0:
+            # for linear probing
+            model.norm = torch.nn.BatchNorm1d(model.norm.normalized_shape[-1])
 
     scheduler = homura.lr_scheduler.CosineAnnealingWithWarmup(cfg.optim.epochs, cfg.optim.warmup_epochs)
     train_loader, test_loader = DATASET_REGISTRY('imagenet')(batch_size=cfg.batch_size,
