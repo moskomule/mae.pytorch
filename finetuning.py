@@ -9,6 +9,7 @@ import rich
 import torch
 from homura import reporters
 from homura.vision import DATASET_REGISTRY
+from torch import nn
 from torch.nn import functional as F
 
 from models import ViTModels
@@ -94,7 +95,8 @@ def _main(cfg: Config):
 
         if len(cfg.finetune_block_ids) == 0:
             # for linear probing
-            model.norm = torch.nn.BatchNorm1d(model.norm.normalized_shape[-1])
+            model.norm = nn.Identity()
+            model.fc = nn.Sequential(nn.BatchNorm1d(model.emb_dim), model.fc)
 
     scheduler = homura.lr_scheduler.CosineAnnealingWithWarmup(cfg.optim.epochs, cfg.optim.warmup_epochs)
     train_loader, test_loader = DATASET_REGISTRY('imagenet')(batch_size=cfg.batch_size,
