@@ -95,7 +95,6 @@ def _main(cfg: Config):
 
         if len(cfg.finetune_block_ids) == 0:
             # for linear probing
-            model.norm = nn.Identity()
             model.fc = nn.Sequential(nn.BatchNorm1d(model.emb_dim), model.fc)
 
     scheduler = homura.lr_scheduler.CosineAnnealingWithWarmup(cfg.optim.epochs, cfg.optim.warmup_epochs)
