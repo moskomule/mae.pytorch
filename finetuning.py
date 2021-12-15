@@ -111,8 +111,6 @@ def _main(cfg: Config):
             print(f"{epoch=} train acc={trainer.reporter.history('accuracy/train')[-1]:.3f}")
             print(f"{epoch=} test acc@1={trainer.reporter.history('accuracy/test')[-1]:.3f}")
 
-        print(trainer.compute_conf_matrix(test_loader))
-
 
 @chika.main(Config, change_job_dir=True)
 @homura.distributed_ready_main
