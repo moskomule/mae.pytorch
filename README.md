@@ -21,10 +21,18 @@ rich
 python [-m torch.distributed.run --nnodes=${NUM_NODES} --nproc_per_node=${NUM_GPUS}] pretrain.py [--amp]
 ```
 
-### Fine tuning
+### Finetuning
+
+#### Linear finetuning
 
 ```shell
-python finetuning.py --path ${PATH_TO_PRETRAINED_WEIGHT} [--finetune_block_ids ...]
+python linear_finetuning.py --path ${PATH_TO_PRETRAINED_WEIGHT}
+```
+
+#### End-to-end finetuning
+
+```shell
+python finetuning.py --path ${PATH_TO_PRETRAINED_WEIGHT} [--finetune_block_ids ...] [--finetune_all]
 ```
 
 ## Results
@@ -33,6 +41,6 @@ python finetuning.py --path ${PATH_TO_PRETRAINED_WEIGHT} [--finetune_block_ids .
 |--------------------------------|------------|
 | Accuracy (Linear probing [^1]) |            |
 
-[^0]: Trained on ImageNet 
+[^0]: Trained on ImageNet
 
 [^1]: 

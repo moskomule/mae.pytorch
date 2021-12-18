@@ -9,7 +9,7 @@ import rich
 import torch
 from homura import reporters
 from homura.vision import DATASET_REGISTRY
-from torch.nn import functional as F
+from torch import nn
 from torchvision.transforms import RandAugment, InterpolationMode
 
 from models import ViTModels
@@ -18,11 +18,12 @@ from vision_utils import fast_collate, gen_mix_collate
 
 @chika.config
 class OptimConfig:
-    epochs: int = 90
+    epochs: int = 100
     warmup_epochs: int = 10
-    lr: float = 0.1
-    weight_decay: float = 0
+    lr: float = 1e-3
+    weight_decay: float = 0.05
     betas: list[float] = chika.sequence(0.9, 0.999, size=2)
+    label_smoothing: float = 0.1
 
 
 class DataConfig:
@@ -124,7 +125,8 @@ def _main(cfg: Config):
                                    test_da=test_da,
                                    num_workers=cfg.num_workers)
 
-    with Trainer(model, None, F.cross_entropy, scheduler=scheduler, reporters=[reporters.TensorboardReporter(".")],
+    with Trainer(model, None, nn.CrossEntropyLoss(label_smoothing=cfg.optim.label_smoothing), scheduler=scheduler,
+                 reporters=[reporters.TensorboardReporter(".")],
                  use_amp=cfg.amp, optim_cfg=cfg.optim) as trainer:
         for epoch in trainer.epoch_range(cfg.optim.epochs):
             trainer.train(train_loader)
