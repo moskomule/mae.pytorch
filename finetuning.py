@@ -26,6 +26,7 @@ class OptimConfig:
     label_smoothing: float = 0.1
 
 
+@chika.config
 class DataConfig:
     batch_size: int = None
     no_randaugment: bool = False
@@ -54,7 +55,7 @@ class Config:
     def __post_init__(self):
         if self.data.batch_size is not None:
             self.batch_size = self.data.batch_size
-        assert not (self.finetune_all and len(self.finetune_block_ids) == 0), \
+        assert not (self.finetune_all and len(self.finetune_block_ids) != 0), \
             'finetune_block_ids and finetune_all are mutually exclusive'
         self.optim.lr *= self.batch_size * homura.get_world_size() / 256
 
@@ -120,7 +121,7 @@ def _main(cfg: Config):
     test_da[1].size = model.image_size
     if cfg.data.randaugment:
         train_da.append(RandAugment(interpolation=InterpolationMode.BILINEAR))
-    train_loader, test_loader = vs(batch_size=cfg.data.batch_size,
+    train_loader, test_loader = vs(batch_size=cfg.batch_size,
                                    train_da=train_da,
                                    test_da=test_da,
                                    num_workers=cfg.num_workers)
