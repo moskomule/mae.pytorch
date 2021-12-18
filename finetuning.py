@@ -9,10 +9,11 @@ import rich
 import torch
 from homura import reporters
 from homura.vision import DATASET_REGISTRY
-from torch import nn
 from torch.nn import functional as F
+from torchvision.transforms import RandAugment, InterpolationMode
 
 from models import ViTModels
+from vision_utils import fast_collate, gen_mix_collate
 
 
 @chika.config
@@ -21,12 +22,24 @@ class OptimConfig:
     warmup_epochs: int = 10
     lr: float = 0.1
     weight_decay: float = 0
-    larc: bool = False
+    betas: list[float] = chika.sequence(0.9, 0.999, size=2)
+
+
+class DataConfig:
+    batch_size: int = None
+    no_randaugment: bool = False
+    mixup: float = 0.8
+    cutmix: float = 1.0
+
+    def __post_init__(self):
+        self.randaugment = not self.no_randaugment
 
 
 @chika.config
 class Config:
     optim: OptimConfig
+    data: DataConfig
+
     path: str = chika.required(help="Path to the pretrained weight")
     batch_size: int = 256
     num_workers: int = 32
@@ -38,6 +51,8 @@ class Config:
     amp: bool = False
 
     def __post_init__(self):
+        if self.data.batch_size is not None:
+            self.batch_size = self.data.batch_size
         assert not (self.finetune_all and len(self.finetune_block_ids) == 0), \
             'finetune_block_ids and finetune_all are mutually exclusive'
         self.optim.lr *= self.batch_size * homura.get_world_size() / 256
@@ -47,8 +62,6 @@ class Trainer(homura.trainers.SupervisedTrainer):
     def __init__(self, *args, **kwargs):
         self.optim_cfg = kwargs.pop('optim_cfg')
         super().__init__(*args, **kwargs)
-        if self.optim_cfg.larc:
-            self.optimizer = homura.optim.LARC(self.optimizer)
 
     def iteration(self,
                   data
@@ -59,8 +72,8 @@ class Trainer(homura.trainers.SupervisedTrainer):
     def set_optimizer(self
                       ) -> None:
         params = [p for p in self.model.parameters() if p.requires_grad]
-        self.optimizer = torch.optim.SGD(params, lr=self.optim_cfg.lr, momentum=0.9,
-                                         weight_decay=self.optim_cfg.weight_decay)
+        self.optimizer = torch.optim._multi_tensor.AdamW(params, lr=self.optim_cfg.lr, betas=self.optim_cfg.betas,
+                                                         weight_decay=self.optim_cfg.weight_decay)
 
 
 def _main(cfg: Config):
@@ -93,14 +106,23 @@ def _main(cfg: Config):
 
         assert len(learnable_module_names) == num_learnable_params, f"mismatch"
 
-        if len(cfg.finetune_block_ids) == 0:
-            # for linear probing
-            model.fc = nn.Sequential(nn.BatchNorm1d(model.emb_dim), model.fc)
-
     scheduler = homura.lr_scheduler.CosineAnnealingWithWarmup(cfg.optim.epochs, cfg.optim.warmup_epochs)
-    train_loader, test_loader = DATASET_REGISTRY('imagenet')(batch_size=cfg.batch_size,
-                                                             num_workers=cfg.num_workers,
-                                                             non_training_bs_factor=1)
+    vs = DATASET_REGISTRY("imagenet")
+    vs.collate_fn = fast_collate if cfg.data.mixup + cfg.data.cutmix == 0 else gen_mix_collate(vs.num_classes,
+                                                                                               cfg.data.mixup,
+                                                                                               cfg.data.cutmix)
+    vs.test_collate_fn = fast_collate
+    train_da = vs.default_train_da.copy()
+    test_da = vs.default_test_da.copy()
+    train_da[0].size = model.image_size
+    test_da[0].size = model.image_size
+    test_da[1].size = model.image_size
+    if cfg.data.randaugment:
+        train_da.append(RandAugment(interpolation=InterpolationMode.BILINEAR))
+    train_loader, test_loader = vs(batch_size=cfg.data.batch_size,
+                                   train_da=train_da,
+                                   test_da=test_da,
+                                   num_workers=cfg.num_workers)
 
     with Trainer(model, None, F.cross_entropy, scheduler=scheduler, reporters=[reporters.TensorboardReporter(".")],
                  use_amp=cfg.amp, optim_cfg=cfg.optim) as trainer:
