@@ -37,10 +37,7 @@ python finetuning.py --path ${PATH_TO_PRETRAINED_WEIGHT} [--finetune_block_ids .
 
 ## Results
 
-|                                | Vit-B [^0] |
-|--------------------------------|------------|
-| Accuracy (Linear probing [^1]) |            |
-
-[^0]: Trained on ImageNet
-
-[^1]: 
+|                                  | Vit-B           |
+|----------------------------------|-----------------|
+| Accuracy (Linear probing)        | 54.5 (BS=8,192) |
+| Accuracy (End-to-end finetuning) | -               |
